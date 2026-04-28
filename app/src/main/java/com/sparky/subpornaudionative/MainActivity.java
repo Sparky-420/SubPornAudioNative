@@ -21,6 +21,8 @@ public class MainActivity extends Activity {
 
     private TextView statusText;
     private TextView detailText;
+    private TextView counterText;
+    private TextView rawText;
     private ProgressBar levelBar;
     private TextView levelText;
 
@@ -32,11 +34,30 @@ public class MainActivity extends Activity {
         public void onReceive(Context context, Intent intent) {
             String status = intent.getStringExtra("status");
             int level = intent.getIntExtra("level", 0);
+            int avg = intent.getIntExtra("avg", 0);
+            int max = intent.getIntExtra("max", 0);
+            String last = intent.getStringExtra("last");
+
+            long totalReads = intent.getLongExtra("totalReads", 0);
+            long audioReads = intent.getLongExtra("audioReads", 0);
+            long silentReads = intent.getLongExtra("silentReads", 0);
+            long zeroReads = intent.getLongExtra("zeroReads", 0);
+            long errorReads = intent.getLongExtra("errorReads", 0);
 
             statusText.setText(status != null ? status : "Sin estado");
-            detailText.setText("Nivel de audio interno: " + level + "%");
+            detailText.setText("Nivel: " + level + "% | AVG: " + avg + " | MAX: " + max);
             levelText.setText(level + "%");
             levelBar.setProgress(level);
+
+            counterText.setText(
+                    "Lecturas totales: " + totalReads +
+                    "\nCon audio: " + audioReads +
+                    "\nSilencio: " + silentReads +
+                    "\nSin muestras: " + zeroReads +
+                    "\nErrores: " + errorReads
+            );
+
+            rawText.setText("Último dato: " + (last != null ? last : "sin dato"));
         }
     };
 
@@ -54,45 +75,70 @@ public class MainActivity extends Activity {
         }
     }
 
+    private TextView makeText(String text, int size, int color, int top, int bottom, boolean bold) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(color);
+        tv.setTextSize(size);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(0, top, 0, bottom);
+        if (bold) {
+            tv.setTypeface(null, 1);
+        }
+        return tv;
+    }
+
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setPadding(40, 40, 40, 40);
+        root.setPadding(34, 34, 34, 34);
         root.setBackgroundColor(Color.rgb(5, 5, 5));
 
-        TextView title = new TextView(this);
-        title.setText("SubPorn Audio Native");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
-        title.setGravity(Gravity.CENTER);
-        title.setTypeface(null, 1);
+        TextView title = makeText("SubPorn Audio Native", 27, Color.WHITE, 0, 18, true);
 
-        statusText = new TextView(this);
-        statusText.setText("Listo para capturar audio interno");
-        statusText.setTextColor(Color.rgb(119, 224, 212));
-        statusText.setTextSize(20);
-        statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 30, 0, 20);
+        statusText = makeText(
+                "Listo para diagnóstico profundo",
+                20,
+                Color.rgb(119, 224, 212),
+                10,
+                14,
+                true
+        );
 
-        detailText = new TextView(this);
-        detailText.setText("Pulsa permisos, luego inicia captura interna y reproduce un video.");
-        detailText.setTextColor(Color.LTGRAY);
-        detailText.setTextSize(16);
-        detailText.setGravity(Gravity.CENTER);
-        detailText.setPadding(0, 0, 0, 20);
+        detailText = makeText(
+                "Primero permisos, luego captura, luego prueba YouTube vs sitio objetivo.",
+                15,
+                Color.LTGRAY,
+                0,
+                16,
+                false
+        );
 
         levelBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         levelBar.setMax(100);
         levelBar.setProgress(0);
-        levelBar.setPadding(0, 20, 0, 20);
+        levelBar.setPadding(0, 15, 0, 15);
 
-        levelText = new TextView(this);
-        levelText.setText("0%");
-        levelText.setTextColor(Color.WHITE);
-        levelText.setTextSize(18);
-        levelText.setGravity(Gravity.CENTER);
-        levelText.setPadding(0, 0, 0, 30);
+        levelText = makeText("0%", 20, Color.WHITE, 0, 20, true);
+
+        counterText = makeText(
+                "Lecturas totales: 0\nCon audio: 0\nSilencio: 0\nSin muestras: 0\nErrores: 0",
+                15,
+                Color.rgb(220, 220, 220),
+                4,
+                18,
+                false
+        );
+
+        rawText = makeText(
+                "Último dato: sin dato",
+                14,
+                Color.rgb(180, 180, 180),
+                0,
+                20,
+                false
+        );
 
         Button permissionButton = new Button(this);
         permissionButton.setText("1. Pedir permisos");
@@ -111,6 +157,8 @@ public class MainActivity extends Activity {
         root.addView(detailText);
         root.addView(levelBar);
         root.addView(levelText);
+        root.addView(counterText);
+        root.addView(rawText);
         root.addView(permissionButton);
         root.addView(startButton);
         root.addView(stopButton);
@@ -160,9 +208,10 @@ public class MainActivity extends Activity {
         stopService(intent);
 
         statusText.setText("Captura detenida");
-        detailText.setText("Nivel de audio interno: 0%");
+        detailText.setText("Nivel: 0% | AVG: 0 | MAX: 0");
         levelBar.setProgress(0);
         levelText.setText("0%");
+        rawText.setText("Último dato: captura detenida");
     }
 
     @Override

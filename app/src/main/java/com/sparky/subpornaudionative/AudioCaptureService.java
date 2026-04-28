@@ -29,6 +29,12 @@ public class AudioCaptureService extends Service {
     private Thread captureThread;
     private volatile boolean running = false;
 
+    private long totalReads = 0;
+    private long audioReads = 0;
+    private long silentReads = 0;
+    private long zeroReads = 0;
+    private long errorReads = 0;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -58,18 +64,23 @@ public class AudioCaptureService extends Service {
         Intent resultData = intent.getParcelableExtra("resultData");
 
         if (resultCode == 0 || resultData == null) {
-            broadcastStatus("Sin permiso MediaProjection", 0);
+            broadcastStatus("Sin permiso MediaProjection", 0, 0, 0, "resultData vacío");
             stopSelf();
             return START_NOT_STICKY;
         }
 
         startInternalAudioCapture(resultCode, resultData);
-
         return START_STICKY;
     }
 
     private void startInternalAudioCapture(int resultCode, Intent resultData) {
         try {
+            totalReads = 0;
+            audioReads = 0;
+            silentReads = 0;
+            zeroReads = 0;
+            errorReads = 0;
+
             MediaProjectionManager manager =
                     (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
 
@@ -80,6 +91,8 @@ public class AudioCaptureService extends Service {
                             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                             .addMatchingUsage(AudioAttributes.USAGE_GAME)
                             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                             .build();
 
             AudioFormat format = new AudioFormat.Builder()
@@ -94,7 +107,7 @@ public class AudioCaptureService extends Service {
                     AudioFormat.ENCODING_PCM_16BIT
             );
 
-            int bufferSize = Math.max(minBufferSize * 2, 4096);
+            int bufferSize = Math.max(minBufferSize * 2, 8192);
 
             audioRecord = new AudioRecord.Builder()
                     .setAudioFormat(format)
@@ -108,10 +121,11 @@ public class AudioCaptureService extends Service {
             captureThread = new Thread(() -> readLoop(bufferSize), "SubPornAudioCaptureThread");
             captureThread.start();
 
-            broadcastStatus("Captura interna iniciada", 0);
+            broadcastStatus("Captura interna iniciada", 0, 0, 0, "Esperando muestras");
 
         } catch (Exception e) {
-            broadcastStatus("Error: " + e.getClass().getSimpleName() + " - " + e.getMessage(), 0);
+            broadcastStatus("Error iniciando captura", 0, 0, 0,
+                    e.getClass().getSimpleName() + ": " + e.getMessage());
             stopSelf();
         }
     }
@@ -123,32 +137,62 @@ public class AudioCaptureService extends Service {
             int read = audioRecord.read(buffer, 0, buffer.length);
 
             if (read > 0) {
+                totalReads++;
+
                 long sum = 0;
+                int max = 0;
 
                 for (int i = 0; i < read; i++) {
-                    sum += Math.abs(buffer[i]);
+                    int abs = Math.abs(buffer[i]);
+                    sum += abs;
+                    if (abs > max) {
+                        max = abs;
+                    }
                 }
 
                 int avg = (int) (sum / read);
                 int level = Math.min(100, (avg * 100) / 12000);
 
-                broadcastStatus("Recibiendo audio interno", level);
+                if (avg > 8 || max > 80) {
+                    audioReads++;
+                    broadcastStatus("Audio capturable activo", level, avg, max, "read=" + read);
+                } else {
+                    silentReads++;
+                    broadcastStatus("Silencio capturado", 0, avg, max, "read=" + read);
+                }
+
+            } else if (read == 0) {
+                zeroReads++;
+                broadcastStatus("Sin muestras nuevas", 0, 0, 0, "read=0");
+
             } else {
-                broadcastStatus("Sin muestras de audio", 0);
+                errorReads++;
+                broadcastStatus("Error AudioRecord.read", 0, 0, 0, "read=" + read);
             }
 
             try {
-                Thread.sleep(160);
+                Thread.sleep(180);
             } catch (InterruptedException ignored) {
             }
         }
     }
 
-    private void broadcastStatus(String status, int level) {
+    private void broadcastStatus(String status, int level, int avg, int max, String last) {
         Intent intent = new Intent(ACTION_LEVEL);
         intent.setPackage(getPackageName());
+
         intent.putExtra("status", status);
         intent.putExtra("level", level);
+        intent.putExtra("avg", avg);
+        intent.putExtra("max", max);
+        intent.putExtra("last", last);
+
+        intent.putExtra("totalReads", totalReads);
+        intent.putExtra("audioReads", audioReads);
+        intent.putExtra("silentReads", silentReads);
+        intent.putExtra("zeroReads", zeroReads);
+        intent.putExtra("errorReads", errorReads);
+
         sendBroadcast(intent);
     }
 
@@ -169,7 +213,7 @@ public class AudioCaptureService extends Service {
 
         return builder
                 .setContentTitle("SubPorn Audio Native")
-                .setContentText("Capturando audio interno")
+                .setContentText("Diagnosticando audio interno")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setOngoing(true)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopPendingIntent)
