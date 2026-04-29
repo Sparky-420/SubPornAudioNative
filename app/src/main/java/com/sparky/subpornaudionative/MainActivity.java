@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -25,9 +28,26 @@ public class MainActivity extends Activity {
     private TextView detailText;
     private TextView counterText;
     private TextView rawText;
+    private TextView blockStatusText;
     private ProgressBar levelBar;
     private TextView levelText;
     private EditText urlInput;
+
+    private TextView micStatusText;
+    private TextView micDetailText;
+    private TextView micCounterText;
+    private ProgressBar micLevelBar;
+    private TextView micLevelText;
+
+    private AudioRecord micRecord;
+    private Thread micThread;
+    private volatile boolean micRunning = false;
+
+    private long micTotalReads = 0;
+    private long micAudioReads = 0;
+    private long micSilentReads = 0;
+    private long micZeroReads = 0;
+    private long micErrorReads = 0;
 
     private static final int REQ_PERMISSIONS = 1001;
     private static final int REQ_MEDIA_PROJECTION = 1002;
@@ -47,8 +67,25 @@ public class MainActivity extends Activity {
             long zeroReads = intent.getLongExtra("zeroReads", 0);
             long errorReads = intent.getLongExtra("errorReads", 0);
 
-            statusText.setText(status != null ? status : "Sin estado");
-            detailText.setText("Nivel: " + level + "% | AVG: " + avg + " | MAX: " + max);
+            boolean blockedSource = totalReads >= 120
+                    && audioReads == 0
+                    && silentReads >= 120
+                    && zeroReads == 0
+                    && errorReads == 0
+                    && avg == 0
+                    && max == 0;
+
+            if (blockedSource) {
+                statusText.setText("Fuente bloqueada / silencio forzado");
+                blockStatusText.setText("Diagnóstico: la fuente sí entrega buffers, pero Android los entrega en cero. Usa micrófono fallback.");
+                blockStatusText.setTextColor(Color.rgb(255, 210, 64));
+            } else {
+                statusText.setText(status != null ? status : "Sin estado");
+                blockStatusText.setText("Diagnóstico: esperando patrón suficiente para decidir si la fuente está bloqueada.");
+                blockStatusText.setTextColor(Color.rgb(180, 180, 180));
+            }
+
+            detailText.setText("Nivel interno: " + level + "% | AVG: " + avg + " | MAX: " + max);
             levelText.setText(level + "%");
             levelBar.setProgress(level);
 
@@ -60,7 +97,7 @@ public class MainActivity extends Activity {
                     "\nErrores: " + errorReads
             );
 
-            rawText.setText("Último dato: " + (last != null ? last : "sin dato"));
+            rawText.setText("Último dato interno: " + (last != null ? last : "sin dato"));
         }
     };
 
@@ -140,17 +177,26 @@ public class MainActivity extends Activity {
                 15,
                 Color.rgb(220, 220, 220),
                 4,
-                18,
+                12,
                 false
         );
 
         rawText = makeText(
-                "Último dato: sin dato",
+                "Último dato interno: sin dato",
+                14,
+                Color.rgb(180, 180, 180),
+                0,
+                14,
+                false
+        );
+
+        blockStatusText = makeText(
+                "Diagnóstico: esperando captura interna.",
                 14,
                 Color.rgb(180, 180, 180),
                 0,
                 20,
-                false
+                true
         );
 
         Button permissionButton = makeButton("1. Pedir permisos");
@@ -159,7 +205,7 @@ public class MainActivity extends Activity {
         Button startButton = makeButton("2. Iniciar captura interna");
         startButton.setOnClickListener(v -> requestMediaProjection());
 
-        Button stopButton = makeButton("3. Detener captura");
+        Button stopButton = makeButton("3. Detener captura interna");
         stopButton.setOnClickListener(v -> stopCapture());
 
         urlInput = new EditText(this);
@@ -191,6 +237,64 @@ public class MainActivity extends Activity {
                 false
         );
 
+        TextView micLabel = makeText(
+                "Micrófono fallback",
+                17,
+                Color.WHITE,
+                28,
+                8,
+                true
+        );
+
+        TextView micHelp = makeText(
+                "Úsalo cuando el audio interno diga fuente bloqueada o silencio forzado.",
+                13,
+                Color.LTGRAY,
+                0,
+                12,
+                false
+        );
+
+        micStatusText = makeText(
+                "Micrófono detenido",
+                18,
+                Color.rgb(119, 224, 212),
+                8,
+                8,
+                true
+        );
+
+        micDetailText = makeText(
+                "Nivel mic: 0% | AVG: 0 | MAX: 0",
+                14,
+                Color.LTGRAY,
+                0,
+                8,
+                false
+        );
+
+        micLevelBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        micLevelBar.setMax(100);
+        micLevelBar.setProgress(0);
+        micLevelBar.setPadding(0, 10, 0, 10);
+
+        micLevelText = makeText("Mic: 0%", 18, Color.WHITE, 0, 10, true);
+
+        micCounterText = makeText(
+                "Mic lecturas: 0\nMic con audio: 0\nMic silencio: 0\nMic sin muestras: 0\nMic errores: 0",
+                14,
+                Color.rgb(220, 220, 220),
+                0,
+                12,
+                false
+        );
+
+        Button micStartButton = makeButton("5. Probar micrófono fallback");
+        micStartButton.setOnClickListener(v -> startMicFallback());
+
+        Button micStopButton = makeButton("6. Detener micrófono fallback");
+        micStopButton.setOnClickListener(v -> stopMicFallback());
+
         root.addView(title);
         root.addView(statusText);
         root.addView(detailText);
@@ -198,6 +302,7 @@ public class MainActivity extends Activity {
         root.addView(levelText);
         root.addView(counterText);
         root.addView(rawText);
+        root.addView(blockStatusText);
         root.addView(permissionButton);
         root.addView(startButton);
         root.addView(stopButton);
@@ -205,6 +310,15 @@ public class MainActivity extends Activity {
         root.addView(webHelp);
         root.addView(urlInput);
         root.addView(webButton);
+        root.addView(micLabel);
+        root.addView(micHelp);
+        root.addView(micStatusText);
+        root.addView(micDetailText);
+        root.addView(micLevelBar);
+        root.addView(micLevelText);
+        root.addView(micCounterText);
+        root.addView(micStartButton);
+        root.addView(micStopButton);
 
         scrollView.addView(root);
         setContentView(scrollView);
@@ -252,10 +366,10 @@ public class MainActivity extends Activity {
         stopService(intent);
 
         statusText.setText("Captura detenida");
-        detailText.setText("Nivel: 0% | AVG: 0 | MAX: 0");
+        detailText.setText("Nivel interno: 0% | AVG: 0 | MAX: 0");
         levelBar.setProgress(0);
         levelText.setText("0%");
-        rawText.setText("Último dato: captura detenida");
+        rawText.setText("Último dato interno: captura detenida");
     }
 
     private void openWebTest() {
@@ -274,6 +388,145 @@ public class MainActivity extends Activity {
         startActivity(intent);
     }
 
+    private void startMicFallback() {
+        if (!hasRecordAudioPermission()) {
+            micStatusText.setText("Falta RECORD_AUDIO");
+            micDetailText.setText("Primero toca '1. Pedir permisos' y acepta micrófono.");
+            return;
+        }
+
+        if (micRunning) {
+            micStatusText.setText("Micrófono ya está activo");
+            return;
+        }
+
+        try {
+            int sampleRate = 44100;
+            int minBufferSize = AudioRecord.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+            );
+
+            if (minBufferSize <= 0) {
+                micStatusText.setText("Error micrófono");
+                micDetailText.setText("Buffer inválido: " + minBufferSize);
+                return;
+            }
+
+            int bufferSize = Math.max(minBufferSize * 2, 8192);
+
+            micRecord = new AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize
+            );
+
+            micRecord.startRecording();
+
+            micTotalReads = 0;
+            micAudioReads = 0;
+            micSilentReads = 0;
+            micZeroReads = 0;
+            micErrorReads = 0;
+            micRunning = true;
+
+            micStatusText.setText("Micrófono fallback activo");
+            micThread = new Thread(() -> micReadLoop(bufferSize), "SubPornMicFallbackThread");
+            micThread.start();
+
+        } catch (Exception e) {
+            micStatusText.setText("Error iniciando micrófono");
+            micDetailText.setText(e.getClass().getSimpleName() + ": " + e.getMessage());
+            stopMicFallback();
+        }
+    }
+
+    private void micReadLoop(int bufferSize) {
+        short[] buffer = new short[bufferSize / 2];
+
+        while (micRunning && micRecord != null) {
+            int read = micRecord.read(buffer, 0, buffer.length);
+
+            if (read > 0) {
+                micTotalReads++;
+
+                long sum = 0;
+                int max = 0;
+
+                for (int i = 0; i < read; i++) {
+                    int abs = Math.abs(buffer[i]);
+                    sum += abs;
+                    if (abs > max) {
+                        max = abs;
+                    }
+                }
+
+                int avg = (int) (sum / read);
+                int level = Math.min(100, (avg * 100) / 7000);
+
+                if (avg > 12 || max > 100) {
+                    micAudioReads++;
+                } else {
+                    micSilentReads++;
+                }
+
+                updateMicUi(level, avg, max, "read=" + read);
+
+            } else if (read == 0) {
+                micZeroReads++;
+                updateMicUi(0, 0, 0, "read=0");
+
+            } else {
+                micErrorReads++;
+                updateMicUi(0, 0, 0, "read=" + read);
+            }
+
+            try {
+                Thread.sleep(180);
+            } catch (InterruptedException ignored) {}
+        }
+    }
+
+    private void updateMicUi(int level, int avg, int max, String last) {
+        runOnUiThread(() -> {
+            micStatusText.setText(level > 0 ? "Micrófono detectando audio" : "Micrófono capturando silencio");
+            micDetailText.setText("Nivel mic: " + level + "% | AVG: " + avg + " | MAX: " + max + " | " + last);
+            micLevelText.setText("Mic: " + level + "%");
+            micLevelBar.setProgress(level);
+            micCounterText.setText(
+                    "Mic lecturas: " + micTotalReads +
+                    "\nMic con audio: " + micAudioReads +
+                    "\nMic silencio: " + micSilentReads +
+                    "\nMic sin muestras: " + micZeroReads +
+                    "\nMic errores: " + micErrorReads
+            );
+        });
+    }
+
+    private void stopMicFallback() {
+        micRunning = false;
+
+        if (micRecord != null) {
+            try {
+                micRecord.stop();
+            } catch (Exception ignored) {}
+
+            try {
+                micRecord.release();
+            } catch (Exception ignored) {}
+
+            micRecord = null;
+        }
+
+        micStatusText.setText("Micrófono fallback detenido");
+        micDetailText.setText("Nivel mic: 0% | AVG: 0 | MAX: 0");
+        micLevelText.setText("Mic: 0%");
+        micLevelBar.setProgress(0);
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -282,9 +535,11 @@ public class MainActivity extends Activity {
             if (hasRecordAudioPermission()) {
                 statusText.setText("Permisos base concedidos");
                 detailText.setText("Ahora toca '2. Iniciar captura interna'.");
+                micStatusText.setText("Micrófono listo para fallback");
             } else {
                 statusText.setText("Permiso de micrófono denegado");
                 detailText.setText("Sin RECORD_AUDIO no se puede capturar audio.");
+                micStatusText.setText("Micrófono denegado");
             }
         }
     }
@@ -320,6 +575,7 @@ public class MainActivity extends Activity {
             unregisterReceiver(levelReceiver);
         } catch (Exception ignored) {}
 
+        stopMicFallback();
         super.onDestroy();
     }
 }
