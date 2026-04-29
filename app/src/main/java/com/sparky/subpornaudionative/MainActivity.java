@@ -13,8 +13,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
@@ -25,6 +27,7 @@ public class MainActivity extends Activity {
     private TextView rawText;
     private ProgressBar levelBar;
     private TextView levelText;
+    private EditText urlInput;
 
     private static final int REQ_PERMISSIONS = 1001;
     private static final int REQ_MEDIA_PROJECTION = 1002;
@@ -82,16 +85,26 @@ public class MainActivity extends Activity {
         tv.setTextSize(size);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(0, top, 0, bottom);
+
         if (bold) {
             tv.setTypeface(null, 1);
         }
+
         return tv;
     }
 
+    private Button makeButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        return button;
+    }
+
     private void buildUi() {
+        ScrollView scrollView = new ScrollView(this);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(34, 34, 34, 34);
         root.setBackgroundColor(Color.rgb(5, 5, 5));
 
@@ -107,7 +120,7 @@ public class MainActivity extends Activity {
         );
 
         detailText = makeText(
-                "Primero permisos, luego captura, luego prueba YouTube vs sitio objetivo.",
+                "Primero permisos, luego captura, luego prueba YouTube vs WebView.",
                 15,
                 Color.LTGRAY,
                 0,
@@ -140,17 +153,43 @@ public class MainActivity extends Activity {
                 false
         );
 
-        Button permissionButton = new Button(this);
-        permissionButton.setText("1. Pedir permisos");
+        Button permissionButton = makeButton("1. Pedir permisos");
         permissionButton.setOnClickListener(v -> requestBasePermissions());
 
-        Button startButton = new Button(this);
-        startButton.setText("2. Iniciar captura interna");
+        Button startButton = makeButton("2. Iniciar captura interna");
         startButton.setOnClickListener(v -> requestMediaProjection());
 
-        Button stopButton = new Button(this);
-        stopButton.setText("3. Detener captura");
+        Button stopButton = makeButton("3. Detener captura");
         stopButton.setOnClickListener(v -> stopCapture());
+
+        urlInput = new EditText(this);
+        urlInput.setHint("URL para prueba WebView");
+        urlInput.setSingleLine(true);
+        urlInput.setTextColor(Color.WHITE);
+        urlInput.setHintTextColor(Color.GRAY);
+        urlInput.setText("https://www.google.com");
+        urlInput.setPadding(20, 16, 20, 16);
+
+        Button webButton = makeButton("4. Abrir WebView de prueba");
+        webButton.setOnClickListener(v -> openWebTest());
+
+        TextView webLabel = makeText(
+                "WebView de prueba",
+                17,
+                Color.WHITE,
+                24,
+                8,
+                true
+        );
+
+        TextView webHelp = makeText(
+                "Inicia captura interna antes de abrir la WebView. Luego reproduce un video y vuelve para revisar números.",
+                13,
+                Color.LTGRAY,
+                0,
+                12,
+                false
+        );
 
         root.addView(title);
         root.addView(statusText);
@@ -162,8 +201,13 @@ public class MainActivity extends Activity {
         root.addView(permissionButton);
         root.addView(startButton);
         root.addView(stopButton);
+        root.addView(webLabel);
+        root.addView(webHelp);
+        root.addView(urlInput);
+        root.addView(webButton);
 
-        setContentView(root);
+        scrollView.addView(root);
+        setContentView(scrollView);
     }
 
     private void requestBasePermissions() {
@@ -212,6 +256,22 @@ public class MainActivity extends Activity {
         levelBar.setProgress(0);
         levelText.setText("0%");
         rawText.setText("Último dato: captura detenida");
+    }
+
+    private void openWebTest() {
+        String url = urlInput != null ? urlInput.getText().toString().trim() : "";
+
+        if (url.length() == 0) {
+            url = "https://www.google.com";
+        }
+
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "https://" + url;
+        }
+
+        Intent intent = new Intent(this, WebTestActivity.class);
+        intent.putExtra("url", url);
+        startActivity(intent);
     }
 
     @Override
