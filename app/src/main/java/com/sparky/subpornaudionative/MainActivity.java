@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private TextView counterText;
     private TextView rawText;
     private TextView blockStatusText;
+    private TextView autoFallbackText;
     private ProgressBar levelBar;
     private TextView levelText;
     private EditText urlInput;
@@ -42,6 +43,7 @@ public class MainActivity extends Activity {
     private AudioRecord micRecord;
     private Thread micThread;
     private volatile boolean micRunning = false;
+    private boolean autoFallbackEnabled = true;
 
     private long micTotalReads = 0;
     private long micAudioReads = 0;
@@ -77,12 +79,36 @@ public class MainActivity extends Activity {
 
             if (blockedSource) {
                 statusText.setText("Fuente bloqueada / silencio forzado");
-                blockStatusText.setText("Diagnóstico: la fuente sí entrega buffers, pero Android los entrega en cero. Usa micrófono fallback.");
+                blockStatusText.setText("Diagnóstico: la fuente sí entrega buffers, pero Android los entrega en cero.");
                 blockStatusText.setTextColor(Color.rgb(255, 210, 64));
+
+                if (autoFallbackEnabled) {
+                    if (hasRecordAudioPermission()) {
+                        if (!micRunning) {
+                            autoFallbackText.setText("Auto fallback: fuente bloqueada detectada; iniciando micrófono.");
+                            autoFallbackText.setTextColor(Color.rgb(119, 224, 212));
+                            startMicFallback();
+                        } else {
+                            autoFallbackText.setText("Auto fallback: micrófono activo por fuente bloqueada.");
+                            autoFallbackText.setTextColor(Color.rgb(119, 224, 212));
+                        }
+                    } else {
+                        autoFallbackText.setText("Auto fallback: falta permiso RECORD_AUDIO.");
+                        autoFallbackText.setTextColor(Color.rgb(255, 96, 96));
+                    }
+                } else {
+                    autoFallbackText.setText("Auto fallback: apagado. Puedes activar micrófono manualmente.");
+                    autoFallbackText.setTextColor(Color.rgb(255, 210, 64));
+                }
             } else {
                 statusText.setText(status != null ? status : "Sin estado");
                 blockStatusText.setText("Diagnóstico: esperando patrón suficiente para decidir si la fuente está bloqueada.");
                 blockStatusText.setTextColor(Color.rgb(180, 180, 180));
+
+                if (autoFallbackEnabled && !micRunning) {
+                    autoFallbackText.setText("Auto fallback: activo, esperando fuente bloqueada.");
+                    autoFallbackText.setTextColor(Color.rgb(180, 180, 180));
+                }
             }
 
             detailText.setText("Nivel interno: " + level + "% | AVG: " + avg + " | MAX: " + max);
@@ -195,6 +221,15 @@ public class MainActivity extends Activity {
                 14,
                 Color.rgb(180, 180, 180),
                 0,
+                12,
+                true
+        );
+
+        autoFallbackText = makeText(
+                "Auto fallback: activo, esperando fuente bloqueada.",
+                14,
+                Color.rgb(180, 180, 180),
+                0,
                 20,
                 true
         );
@@ -247,7 +282,7 @@ public class MainActivity extends Activity {
         );
 
         TextView micHelp = makeText(
-                "Úsalo cuando el audio interno diga fuente bloqueada o silencio forzado.",
+                "Úsalo cuando el audio interno diga fuente bloqueada o silencio forzado. En auto fallback se enciende solo.",
                 13,
                 Color.LTGRAY,
                 0,
@@ -295,6 +330,9 @@ public class MainActivity extends Activity {
         Button micStopButton = makeButton("6. Detener micrófono fallback");
         micStopButton.setOnClickListener(v -> stopMicFallback());
 
+        Button autoFallbackButton = makeButton("7. Alternar auto-fallback");
+        autoFallbackButton.setOnClickListener(v -> toggleAutoFallback());
+
         root.addView(title);
         root.addView(statusText);
         root.addView(detailText);
@@ -303,6 +341,7 @@ public class MainActivity extends Activity {
         root.addView(counterText);
         root.addView(rawText);
         root.addView(blockStatusText);
+        root.addView(autoFallbackText);
         root.addView(permissionButton);
         root.addView(startButton);
         root.addView(stopButton);
@@ -319,6 +358,7 @@ public class MainActivity extends Activity {
         root.addView(micCounterText);
         root.addView(micStartButton);
         root.addView(micStopButton);
+        root.addView(autoFallbackButton);
 
         scrollView.addView(root);
         setContentView(scrollView);
@@ -386,6 +426,18 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(this, WebTestActivity.class);
         intent.putExtra("url", url);
         startActivity(intent);
+    }
+
+    private void toggleAutoFallback() {
+        autoFallbackEnabled = !autoFallbackEnabled;
+
+        if (autoFallbackEnabled) {
+            autoFallbackText.setText("Auto fallback: activo, esperando fuente bloqueada.");
+            autoFallbackText.setTextColor(Color.rgb(119, 224, 212));
+        } else {
+            autoFallbackText.setText("Auto fallback: apagado. Usa el botón 5 si lo necesitas.");
+            autoFallbackText.setTextColor(Color.rgb(255, 210, 64));
+        }
     }
 
     private void startMicFallback() {
@@ -536,10 +588,12 @@ public class MainActivity extends Activity {
                 statusText.setText("Permisos base concedidos");
                 detailText.setText("Ahora toca '2. Iniciar captura interna'.");
                 micStatusText.setText("Micrófono listo para fallback");
+                autoFallbackText.setText("Auto fallback: activo, esperando fuente bloqueada.");
             } else {
                 statusText.setText("Permiso de micrófono denegado");
                 detailText.setText("Sin RECORD_AUDIO no se puede capturar audio.");
                 micStatusText.setText("Micrófono denegado");
+                autoFallbackText.setText("Auto fallback: falta permiso RECORD_AUDIO.");
             }
         }
     }
